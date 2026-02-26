@@ -1663,3 +1663,85 @@ export function logger_add_text(data, text) {
 export function logger_set_attr(data, type, value) {
     console.log('set_attr: %s="%s"', attr_to_html_attr(type), value)
 }
+
+/**
+ * Demo -- yswang add
+ * @param {HTMLElement} messageRoot - 左侧消息容器
+ * @param {{onCodeStart, onCodeUpdate, onCodeEnd}} artifactCallbacks - 右侧代码展示容器
+ */
+export function artifact_renderer(messageRoot, artifactCallbacks) {
+    // 基础渲染器用于处理普通的文本、标题等
+    const base = default_renderer(messageRoot);
+    
+    const callbacks = Object.assign({
+        onCodeStart: function() {},
+        onCodeUpdate: function() {},
+        onCodeEnd: function() {},
+        onCodeLangChange: function() {}
+    }, artifactCallbacks || {});
+
+    // 状态记录：当前是否正在处理要分流的代码块
+    let isCodeFencing = false;
+
+    return {
+        ...base,
+
+        add_token(data, type) {
+            if (type === Token.Code_Fence) {
+                isCodeFencing = true;
+                
+                // 1. 在左侧消息区创建一个“占位符卡片”
+                const card = document.createElement("div");
+                card.className = "artifact-placeholder-card";
+                card.innerHTML = `
+                    <div class="icon">📄</div>
+                    <div class="info">生成代码中...</div>
+                `;
+                messageRoot.appendChild(card);
+                
+                // 2. 激活并清空右侧区域
+                callbacks.onCodeStart(data, type);
+                
+                return;
+            }
+
+            // 普通内容交给原生的 default_renderer
+            base.add_token(data, type);
+        },
+
+        add_text(data, text) {
+            if (isCodeFencing) {
+                // 3. 将流式内容实时输出到右侧
+                // 如果你使用 Monaco，这里调用 editor.setValue 或 applyEdits
+                callbacks.onCodeUpdate(text);
+                return;
+            }
+
+            base.add_text(data, text);
+        },
+
+        end_token(data) {
+            if (isCodeFencing) {
+                isCodeFencing = false;
+                // 代码块结束，可以更新左侧卡片的状态
+                const lastCard = messageRoot.querySelector(".artifact-placeholder-card:last-child .info");
+                if (lastCard) {
+                    lastCard.innerText = "代码生成完毕";
+                }
+                callbacks.onCodeEnd(data);
+                return;
+            }
+            base.end_token(data);
+        },
+
+        set_attr(data, type, value) {
+            if (isCodeFencing && type === Attr.Lang) {
+                // 可以根据语言更新右侧的语法高亮模式
+                console.log("检测到语言:", value);
+                callbacks.onCodeLangChange(value);
+                return;
+            }
+            base.set_attr(data, type, value);
+        }
+    };
+}
